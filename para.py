@@ -9,9 +9,11 @@ TODO: take a public key on the command line to encrypt it with
 """
 
 import os, sys, getopt, requests
-from Crypto.Cipher import AES
-from Crypto import Random
 from base64 import b64encode, b64decode
+from Crypto.Hash import SHA256
+from Crypto.Cipher import AES, PKCS1_OAEP
+from Crypto.PublicKey import RSA
+from Crypto import Random
 
 def enum(**enums):
     return type('Enum', (), enums)
@@ -28,6 +30,37 @@ def encode(s):
     return b64encode(s, alt)
 def decode(s):
     return b64decode(s, alt)
+
+def session_encrypt(data):
+    key = Random.new().read(32) # 256-bit key
+    iv = Random.new().read(AES.block_size)
+    cipher = AES.new(key, AES.MODE_CFB, iv)
+    msg = iv + cipher.encrypt(data)
+    return key, msg
+
+def session_decrypt(key, data):
+    iv, msg = data[:AES.block_size], data[AES.block_size:]
+    cipher = AES.new(key, AES.MODE_CFB, iv)
+    return cipher.decrypt(msg)
+
+def asymmetric_encrypt(public_key_file, data):
+    # Encrypt actual data with random key
+    session_key, ctext = session_encrypt(data)
+
+    # Encrypt random key with public key
+    public_key = RSA.importKey(open(public_key_file).read())
+    cipher = PKCS1_OAEP.new(public_key, hashAlgo=SHA256)
+    csession_key = cipher.encrypt(session_key)
+
+    # Return encrypted random key, and data encrypted with random key
+    return csession_key, ctext
+
+def asymmetric_decrypt(private_key_file, csession_key, ctext):
+    private_key = RSA.importKey(open(private_key_file).read())
+    cipher = PKCS1_OAEP.new(private_key, hashAlgo=SHA256)
+    session_key = cipher.decrypt(csession_key)
+
+    return session_decrypt(session_key, ctext)
 
 # Might change depending on the shortener
 max_step = 32768
@@ -52,15 +85,24 @@ def store(url):
     print >> sys.stderr, "Something terrible happened"
     os.exit(1)
 
-def push(file):
+def push(file, public_key=None):
     def reverse(s):
         return s[::-1]
 
-    chunks = reverse(toChunks(readFile(file)))
+    chunks = None
+    data = readFile(file)
+    cipher_session_key = []
+    if public_key:
+        csession, data = asymmetric_encrypt(public_key, data)
+        cipher_session_key = encode(csession)
+
+    chunks = reverse([cipher_session_key] + toChunks(data))
     prev = str()
     for chunk in chunks:
         url = prev + separator + chunk
+        print url
         prev = store(url)
+
     return prev
 
 # start: c6em4sp, or crdr8g8
@@ -73,26 +115,44 @@ def retrieve(key):
         data = data[7:]
     return data
 
-def pull(key):
+def pull(pointer, private_key=None):
+    cipher_session_key = str()
     chunks = []
-    next = key
-    i = 0
+    next = pointer
     while next:
         [next, chunk] = retrieve(next).split(separator)
+
+        print next + " : " + chunk
+
+        # Pull out the encrypted session key (first chunk) if our stream is
+        # encrypted
+        if private_key and not cipher_session_key and not chunks:
+            cipher_session_key = decode(chunk)
+            print "session key: %r" % cipher_session_key
+            continue
+
         chunks.append(chunk)
-        i += 1
-    return fromChunks(chunks)
+
+    data = str()
+    if private_key:
+        ciphertext = fromChunks(chunks)
+        data = asymmetric_decrypt(private_key, cipher_session_key, ciphertext)
+    else:
+        data = fromChunks(chunks)
+
+    return data
 
 def usage():
     text = """
 usage: ./a.out [options] [file]
 
 options:
-    -p, --put           upload a file
-    -g, --get=<key>     download a file
-    -f, --file=<file>   use <file> as the file
+    -p, --put                   upload a file
+    -g, --get=<pointer>         download a file
+    -k, --key=<path>            specify a public or private key
+    -f, --file=<file>           use <file> as the file
 
-    -h, --help          this message
+    -h, --help                  this message
 """
     print >> sys.stderr, text
     sys.exit(1)
@@ -100,24 +160,31 @@ options:
 # Make it read from stdin
 def main(argv):
     try:
-        opts, args = getopt.getopt(argv, "hpg:f:", ["help", "put", "get=", "file="])
+        opts, args = getopt.getopt(argv, "hpg:k:f:", ["help", "put", "get=", "key=", "file="])
     except getopt.GetoptError as err:
         print >> sys.stderr, str(err)
         usage()
 
-    direction = file = key = None
+    direction = file = key = pointer = None
 
     for opt, arg in opts:
         if opt == "-h":
             usage()
         if opt == "-p":
             direction = Directions.UPLOAD
+            print "putting"
         elif opt in ["-g", "--get"]:
             direction = Directions.DOWNLOAD
+            pointer = arg
+            print "pointer:", pointer
+        elif opt in ["-k", "--key"]:
             key = arg
+            print "key:", key
         elif opt in ["-f", "--file"]:
             file = arg
+            print "file:", file
         else:
+            print "opt:", opt + ",", "arg:", arg
             usage()
 
     if not direction:
@@ -125,14 +192,14 @@ def main(argv):
     elif direction == Directions.UPLOAD and not file:
         print >> sys.stderr, "What file do you want to upload, chief?"
         sys.exit(1)
-    elif direction == Directions.DOWNLOAD and not key:
+    elif direction == Directions.DOWNLOAD and not pointer:
         print >> sys.stderr, "What file do you want to download, champ?"
         sys.exit(1)
 
     if direction == Directions.UPLOAD:
-        print "retrieval key:", push(file)
+        print "retrieval pointer:", push(file, key)
     elif direction == Directions.DOWNLOAD:
-        data = pull(key)
+        data = pull(pointer, key)
         if not file or file == "-":
             print data
         else:
