@@ -1,12 +1,11 @@
 #!/usr/bin/env python
 
 """
-Idea: generate a URL pointer.data which form a linked-list. We store each link
-in the list in a URL shortener. The head is just a pointer and can be retrieved
-at will.
-
-TODO: take a public key on the command line to encrypt it with
+Idea: generate a URL of the formpointer:data which form a linked-list. We store
+each link in the list in a URL shortener. The head is just a pointer and can be
+retrieved at will.
 """
+# TODO maybe split this up into a few classes?
 
 import os, sys, getopt, requests
 from base64 import b64encode, b64decode
@@ -24,12 +23,14 @@ def readFile(file):
 def writeFile(file, data):
     open(file, "w").write(data)
 
+
 alt = ".-"
 separator = ':'
 def encode(s):
     return b64encode(s, alt)
 def decode(s):
     return b64decode(s, alt)
+
 
 def session_encrypt(data):
     key = Random.new().read(32) # 256-bit key
@@ -38,10 +39,12 @@ def session_encrypt(data):
     msg = iv + cipher.encrypt(data)
     return key, msg
 
+
 def session_decrypt(key, data):
     iv, msg = data[:AES.block_size], data[AES.block_size:]
     cipher = AES.new(key, AES.MODE_CFB, iv)
     return cipher.decrypt(msg)
+
 
 def asymmetric_encrypt(public_key_file, data):
     # Encrypt actual data with random key
@@ -55,12 +58,14 @@ def asymmetric_encrypt(public_key_file, data):
     # Return encrypted random key, and data encrypted with random key
     return csession_key, ctext
 
+
 def asymmetric_decrypt(private_key_file, csession_key, ctext):
     private_key = RSA.importKey(open(private_key_file).read())
     cipher = PKCS1_OAEP.new(private_key, hashAlgo=SHA256)
     session_key = cipher.decrypt(csession_key)
 
     return session_decrypt(session_key, ctext)
+
 
 # Might change depending on the shortener
 max_step = 32768
@@ -71,11 +76,13 @@ def toChunks(data):
         chunks.append(data[i:i + max_step])
     return chunks
 
+
 def fromChunks(chunks):
     data = str()
     for chunk in chunks:
         data += chunk
     return decode(data)
+
 
 def store(url):
     r = requests.get(service + "/api-create.php?url=" + url, allow_redirects=False)
@@ -84,6 +91,7 @@ def store(url):
         return r.text[19:]
     print >> sys.stderr, "Something terrible happened"
     os.exit(1)
+
 
 def push(file, public_key=None):
     def reverse(s):
@@ -100,10 +108,10 @@ def push(file, public_key=None):
     prev = str()
     for chunk in chunks:
         url = prev + separator + chunk
-        print url
         prev = store(url)
 
     return prev
+
 
 # start: c6em4sp, or crdr8g8
 service = "http://tinyurl.com"
@@ -115,6 +123,7 @@ def retrieve(key):
         data = data[7:]
     return data
 
+
 def pull(pointer, private_key=None):
     cipher_session_key = str()
     chunks = []
@@ -122,13 +131,10 @@ def pull(pointer, private_key=None):
     while next:
         [next, chunk] = retrieve(next).split(separator)
 
-        print next + " : " + chunk
-
         # Pull out the encrypted session key (first chunk) if our stream is
         # encrypted
         if private_key and not cipher_session_key and not chunks:
             cipher_session_key = decode(chunk)
-            print "session key: %r" % cipher_session_key
             continue
 
         chunks.append(chunk)
@@ -141,6 +147,7 @@ def pull(pointer, private_key=None):
         data = fromChunks(chunks)
 
     return data
+
 
 def usage():
     text = """
@@ -157,6 +164,7 @@ options:
     print >> sys.stderr, text
     sys.exit(1)
 
+
 # Make it read from stdin
 def main(argv):
     try:
@@ -172,19 +180,14 @@ def main(argv):
             usage()
         if opt == "-p":
             direction = Directions.UPLOAD
-            print "putting"
         elif opt in ["-g", "--get"]:
             direction = Directions.DOWNLOAD
             pointer = arg
-            print "pointer:", pointer
         elif opt in ["-k", "--key"]:
             key = arg
-            print "key:", key
         elif opt in ["-f", "--file"]:
             file = arg
-            print "file:", file
         else:
-            print "opt:", opt + ",", "arg:", arg
             usage()
 
     if not direction:
