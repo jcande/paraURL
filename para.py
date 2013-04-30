@@ -5,7 +5,11 @@ Idea: generate a URL of the formpointer:data which form a linked-list. We store
 each link in the list in a URL shortener. The head is just a pointer and can be
 retrieved at will.
 """
-# TODO maybe split this up into a few classes?
+# TODO
+# maybe split this up into a few classes?
+# have it also read form stdin
+# encrypt the entire chunk (including the pointer), so no one knows the chunk order/all the chunks
+#  - does this impact security?
 
 import os, sys, getopt, requests
 from base64 import b64encode, b64decode
@@ -33,8 +37,9 @@ def decode(s):
 
 
 def session_encrypt(data):
-    key = Random.new().read(32) # 256-bit key
-    iv = Random.new().read(AES.block_size)
+    rand = Random.new()
+    key = rand.read(32) # 256-bit key
+    iv = rand.read(AES.block_size)
     cipher = AES.new(key, AES.MODE_CFB, iv)
     msg = iv + cipher.encrypt(data)
     return key, msg
@@ -68,7 +73,7 @@ def asymmetric_decrypt(private_key_file, csession_key, ctext):
 
 
 # Might change depending on the shortener
-max_step = 32768
+max_step = 2**14
 def toChunks(data):
     data = encode(data)
     chunks = []
@@ -89,8 +94,10 @@ def store(url):
     if r.status_code == 200:
         # skip over "http://tinyurl.com/"
         return r.text[19:]
-    print >> sys.stderr, "Something terrible happened"
-    os.exit(1)
+    print >> sys.stderr, "Something terrible happened!"
+    print >> sys.stderr, "Server returned:", r.status_code
+    print >> sys.stderr, "Try lowering the max chunk size"
+    sys.exit(1)
 
 
 def push(file, public_key=None):
@@ -118,7 +125,6 @@ service = "http://tinyurl.com"
 def retrieve(key):
     r = requests.get(service + "/" + key, allow_redirects=False)
     data = r.headers['location']
-    # skip over "http://blah/" if it's present
     if data[:7] == "http://":
         data = data[7:]
     return data
@@ -165,7 +171,6 @@ options:
     sys.exit(1)
 
 
-# Make it read from stdin
 def main(argv):
     try:
         opts, args = getopt.getopt(argv, "hpg:k:f:", ["help", "put", "get=", "key=", "file="])
@@ -194,10 +199,10 @@ def main(argv):
         usage()
     elif direction == Directions.UPLOAD and not file:
         print >> sys.stderr, "What file do you want to upload, chief?"
-        sys.exit(1)
+        usage()
     elif direction == Directions.DOWNLOAD and not pointer:
         print >> sys.stderr, "What file do you want to download, champ?"
-        sys.exit(1)
+        usage()
 
     if direction == Directions.UPLOAD:
         print "retrieval pointer:", push(file, key)
