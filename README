@@ -5,11 +5,11 @@ To download a file:
 If no file is specified, it is printed to stdout.
 
 To upload a file:
-	./para.py -p -f <file_to_upload> [-k <private_key_to_use>]
+	./para.py -p -f <file_to_upload> [-k <public_key_to_use>]
 Make sure you keep the pointer that's printed.
 
 I was recently reading _Silence on the Wire_, which has a section on parasitic computing, and the memory of xor-crew's tinyurlfuckery came back to me. I was feeling pretty excited from reading the book and decided to reimplement their idea. I also added encryption so I don't come off as a total phony. 
 
-How the data is stored is as a simple linked list. The data is base64 encoded and then chopped into equal sized chunks. Each chunk is combined with a pointer to the next chunk (we upload tail to head) and looks like: <next>:<data>. The last pointer is then used to retrieve the list. If the data is encrypted, the first chunk is actually the session key encrypting the rest of the list.
+How the data is stored is as a simple linked list. The data is base64 encoded and then chopped into equal sized chunks. Each chunk is combined with a pointer to the next chunk (we upload tail to head) and looks like: <next>:<data>. The last returned pointer is then used to retrieve the list. If the data is encrypted, the first chunk is actually the session key encrypting the rest of the list.
 
 I plan to abstract away the specifics of a service so that it will work on any URL shortener. This hasn't happened yet. Also, don't use this.
